@@ -51,21 +51,31 @@ export function WaveformScope({ analyser }: WaveformScopeProps) {
       }
 
       context.strokeStyle = "#ffffff";
-      context.lineWidth = 2;
+      context.lineWidth = 2.6;
       context.beginPath();
 
       if (analyser && data) {
         analyser.getByteTimeDomainData(data);
-        for (let index = 0; index < data.length; index += 1) {
-          const x = (index / (data.length - 1)) * width;
-          const y = (data[index] / 255) * height;
+        let start = 0;
+        for (let index = 1; index < data.length; index += 1) {
+          if (data[index - 1] < 128 && data[index] >= 128) {
+            start = index;
+            break;
+          }
+        }
+
+        const span = Math.min(512, data.length - start);
+        for (let index = 0; index < span; index += 1) {
+          const sample = (data[start + index] - 128) / 128;
+          const x = (index / Math.max(span - 1, 1)) * width;
+          const y = mid - sample * height * 0.42;
           if (index === 0) context.moveTo(x, y);
           else context.lineTo(x, y);
         }
       } else {
         for (let index = 0; index < width; index += 1) {
           const phase = index / width;
-          const y = mid - Math.sin(phase * Math.PI * 6 + frame * 0.03) * height * 0.2;
+          const y = mid - Math.sin(phase * Math.PI * 6 + frame * 0.03) * height * 0.34;
           if (index === 0) context.moveTo(index, y);
           else context.lineTo(index, y);
         }

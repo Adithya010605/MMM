@@ -28,6 +28,13 @@ export type EnvelopePatch = {
   release: number;
 };
 
+export type NoisePatch = {
+  enabled: boolean;
+  color: NoiseColor;
+  volume: number;
+  envelope: EnvelopePatch;
+};
+
 export type FilterPatch = {
   cutoff: number;
   emphasis: number;
@@ -61,8 +68,7 @@ export type PerformancePatch = {
 
 export type SynthPatch = {
   oscillators: [OscillatorPatch, OscillatorPatch, OscillatorPatch];
-  noiseColor: NoiseColor;
-  noiseVolume: number;
+  noise: NoisePatch;
   externalVolume: number;
   filter: FilterPatch;
   amplifier: AmplifierPatch;

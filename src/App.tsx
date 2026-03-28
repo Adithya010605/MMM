@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useState, type Dispatch, type SetStateAction } from "react";
+import { startTransition, useDeferredValue, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { defaultPatch } from "./config/defaultPatch";
 import { Knob } from "./components/Knob";
 import { Selector } from "./components/Selector";
@@ -47,6 +47,8 @@ function updatePatch(setter: Dispatch<SetStateAction<SynthPatch>>, recipe: (patc
 
 export function App() {
   const [patch, setPatch] = useState(defaultPatch);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const deferredPatch = useDeferredValue(patch);
   const engineRef = useSynthEngine(deferredPatch);
   useKeyboardSynth(engineRef);
@@ -62,6 +64,30 @@ export function App() {
       ) as SynthPatch["oscillators"],
     }));
   };
+
+  async function armAudio(): Promise<void> {
+    try {
+      await engineRef.current?.unlock();
+      setAudioEnabled(true);
+      setAudioError(null);
+    } catch {
+      setAudioError("Audio could not start. Reload and allow browser audio.");
+    }
+  }
+
+  useEffect(() => {
+    const enable = () => {
+      void armAudio();
+    };
+
+    window.addEventListener("pointerdown", enable, { once: true });
+    window.addEventListener("keydown", enable, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", enable);
+      window.removeEventListener("keydown", enable);
+    };
+  }, []);
 
   return (
     <main className="app-shell">
@@ -88,6 +114,10 @@ export function App() {
             <p className="signal-arrow">MIXER &gt; LADDER FILTER &gt; AMP</p>
             <p className="signal-detail">{signalSummary}</p>
             <p className="signal-detail">Keys: Z-M / Q-I</p>
+            <button type="button" className={audioEnabled ? "arm-button is-live" : "arm-button"} onClick={() => void armAudio()}>
+              {audioEnabled ? "Audio Live" : "Enable Audio"}
+            </button>
+            {audioError ? <p className="signal-detail">{audioError}</p> : null}
           </div>
         </div>
       </section>
@@ -177,19 +207,29 @@ export function App() {
           <div className="module-grid">
             <Selector
               label="Noise Color"
-              value={patch.noiseColor}
+              value={patch.noise.color}
               options={NOISE_OPTIONS}
-              onChange={(noiseColor) => updatePatch(setPatch, (current) => ({ ...current, noiseColor }))}
+              onChange={(color) =>
+                updatePatch(setPatch, (current) => ({
+                  ...current,
+                  noise: { ...current.noise, color },
+                }))
+              }
             />
             <div className="knob-row knob-row-wide">
               <Knob
                 label="Noise Volume"
-                value={patch.noiseVolume}
+                value={patch.noise.volume}
                 min={0}
                 max={1}
                 step={0.01}
                 formatValue={(value) => `${Math.round(value * 10)}`}
-                onChange={(noiseVolume) => updatePatch(setPatch, (current) => ({ ...current, noiseVolume }))}
+                onChange={(volume) =>
+                  updatePatch(setPatch, (current) => ({
+                    ...current,
+                    noise: { ...current.noise, volume },
+                  }))
+                }
               />
               <Knob
                 label="External Volume"
@@ -211,6 +251,76 @@ export function App() {
                   updatePatch(setPatch, (current) => ({
                     ...current,
                     output: { ...current.output, masterVolume },
+                  }))
+                }
+              />
+            </div>
+            <div className="knob-row knob-row-wide">
+              <Knob
+                label="Noise Attack"
+                value={patch.noise.envelope.attack}
+                min={0.005}
+                max={2}
+                step={0.01}
+                formatValue={(value) => `${value.toFixed(2)} s`}
+                onChange={(attack) =>
+                  updatePatch(setPatch, (current) => ({
+                    ...current,
+                    noise: { ...current.noise, envelope: { ...current.noise.envelope, attack } },
+                  }))
+                }
+              />
+              <Knob
+                label="Noise Decay"
+                value={patch.noise.envelope.decay}
+                min={0.005}
+                max={4}
+                step={0.01}
+                formatValue={(value) => `${value.toFixed(2)} s`}
+                onChange={(decay) =>
+                  updatePatch(setPatch, (current) => ({
+                    ...current,
+                    noise: { ...current.noise, envelope: { ...current.noise.envelope, decay } },
+                  }))
+                }
+              />
+              <Knob
+                label="Noise Sustain"
+                value={patch.noise.envelope.sustain}
+                min={0}
+                max={1}
+                step={0.01}
+                formatValue={(value) => `${Math.round(value * 100)}%`}
+                onChange={(sustain) =>
+                  updatePatch(setPatch, (current) => ({
+                    ...current,
+                    noise: { ...current.noise, envelope: { ...current.noise.envelope, sustain } },
+                  }))
+                }
+              />
+              <Knob
+                label="Noise Release"
+                value={patch.noise.envelope.release}
+                min={0.005}
+                max={4}
+                step={0.01}
+                formatValue={(value) => `${value.toFixed(2)} s`}
+                onChange={(release) =>
+                  updatePatch(setPatch, (current) => ({
+                    ...current,
+                    noise: { ...current.noise, envelope: { ...current.noise.envelope, release } },
+                  }))
+                }
+              />
+            </div>
+            <div className="toggle-row">
+              <Toggle
+                label="Noise Enabled"
+                checked={patch.noise.enabled}
+                onChange={(enabled) =>
+                  updatePatch(setPatch, (current) => ({
+                    ...current,
+                    noise: { ...current.noise, enabled },
                   }))
                 }
               />
@@ -491,7 +601,7 @@ export function App() {
 
       <Keyboard
         onNoteStart={(note) => {
-          void engineRef.current?.noteOn(note);
+          void armAudio().then(() => engineRef.current?.noteOn(note));
         }}
         onNoteEnd={(note) => {
           engineRef.current?.noteOff(note);

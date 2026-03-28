@@ -33,8 +33,17 @@ export const defaultPatch: SynthPatch = {
       lfoMode: true,
     },
   ],
-  noiseColor: "white",
-  noiseVolume: 0.12,
+  noise: {
+    enabled: false,
+    color: "white",
+    volume: 0.08,
+    envelope: {
+      attack: 0.01,
+      decay: 0.18,
+      sustain: 0.15,
+      release: 0.12,
+    },
+  },
   externalVolume: 0,
   filter: {
     cutoff: 1800,

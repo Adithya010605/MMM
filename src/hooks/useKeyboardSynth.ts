@@ -24,6 +24,7 @@ export function useKeyboardSynth(engineRef: MutableRefObject<SynthEngine | null>
     const handleKeyUp = (event: KeyboardEvent) => {
       const note = KEYBOARD_NOTE_MAP[event.code];
       if (note === undefined) return;
+      if (!activeCodesRef.current.has(event.code)) return;
       activeCodesRef.current.delete(event.code);
       engineRef.current?.noteOff(note);
     };

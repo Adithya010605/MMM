@@ -32,14 +32,14 @@ class MoogLadderFilterProcessor extends AudioWorkletProcessor {
       const resonance = resonanceValues.length > 1 ? resonanceValues[index] : resonanceValues[0];
       const drive = driveValues.length > 1 ? driveValues[index] : driveValues[0];
 
-      const normalized = Math.min(0.99, (2 * Math.PI * cutoff) / sampleRate);
-      const feedback = resonance * (1 - 0.15 * normalized * normalized);
-      const driven = Math.tanh(inputSample * drive - feedback * this.z4);
+      const g = 1 - Math.exp((-2 * Math.PI * cutoff) / sampleRate);
+      const feedback = resonance * 0.85;
+      const driven = Math.tanh(inputSample * drive - this.z4 * feedback);
 
-      this.z1 += normalized * (driven - this.z1);
-      this.z2 += normalized * (this.z1 - this.z2);
-      this.z3 += normalized * (this.z2 - this.z3);
-      this.z4 += normalized * (this.z3 - this.z4);
+      this.z1 += g * (driven - this.z1);
+      this.z2 += g * (this.z1 - this.z2);
+      this.z3 += g * (this.z2 - this.z3);
+      this.z4 += g * (this.z3 - this.z4);
 
       outputChannel[index] = Math.max(-1, Math.min(1, this.z4));
     }

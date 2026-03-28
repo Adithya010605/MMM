@@ -16,8 +16,7 @@ export function Knob({ label, value, min, max, step = 0.01, formatValue, onChang
   const ratio = (value - min) / (max - min || 1);
   const angle = -140 + ratio * 280;
 
-  const applyDelta = (delta: number) => {
-    const next = clamp(value + delta * step, min, max);
+  const snap = (next: number) => {
     onChange(Number(next.toFixed(step < 1 ? 3 : 0)));
   };
 
@@ -28,14 +27,16 @@ export function Knob({ label, value, min, max, step = 0.01, formatValue, onChang
         className="knob"
         aria-label={label}
         onPointerDown={(event) => {
-          let previousY = event.clientY;
+          const startY = event.clientY;
+          const startValue = value;
           const target = event.currentTarget;
 
           const handleMove = (moveEvent: PointerEvent) => {
-            const deltaY = previousY - moveEvent.clientY;
-            if (Math.abs(deltaY) < 2) return;
-            applyDelta(deltaY);
-            previousY = moveEvent.clientY;
+            const totalDelta = startY - moveEvent.clientY;
+            const precision = moveEvent.shiftKey ? 18 : 6;
+            const steps = totalDelta / precision;
+            const next = clamp(startValue + steps * step, min, max);
+            snap(next);
           };
 
           const handleUp = () => {
@@ -50,12 +51,18 @@ export function Knob({ label, value, min, max, step = 0.01, formatValue, onChang
         onKeyDown={(event) => {
           if (event.key === "ArrowUp" || event.key === "ArrowRight") {
             event.preventDefault();
-            applyDelta(1);
+            snap(clamp(value + step, min, max));
           }
           if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
             event.preventDefault();
-            applyDelta(-1);
+            snap(clamp(value - step, min, max));
           }
+        }}
+        onWheel={(event) => {
+          event.preventDefault();
+          const precision = event.shiftKey ? 0.25 : 1;
+          const direction = event.deltaY < 0 ? 1 : -1;
+          snap(clamp(value + direction * step * precision, min, max));
         }}
       >
         <span className="knob-face" style={{ transform: `rotate(${angle}deg)` }}>

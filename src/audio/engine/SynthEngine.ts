@@ -23,7 +23,9 @@ type SynthGraph = {
     pitchGain: GainNode;
   }>;
   noiseSource: AudioBufferSourceNode;
-  noiseGain: GainNode;
+  noiseLevelGain: GainNode;
+  noiseEnvelopeGain: GainNode;
+  periodicWaves: Partial<Record<OscillatorWave, PeriodicWave>>;
 };
 
 const RANGE_OFFSETS: Record<OscillatorPatch["range"], number> = {
@@ -54,6 +56,44 @@ function seconds(value: number): number {
   return Math.max(0.005, value);
 }
 
+function createPeriodicWave(
+  context: AudioContext,
+  harmonicFormula: (harmonic: number) => number,
+  length = 64,
+): PeriodicWave {
+  const real = new Float32Array(length);
+  const imag = new Float32Array(length);
+
+  for (let harmonic = 1; harmonic < length; harmonic += 1) {
+    imag[harmonic] = harmonicFormula(harmonic);
+  }
+
+  return context.createPeriodicWave(real, imag);
+}
+
+function createPeriodicWaves(context: AudioContext): Partial<Record<OscillatorWave, PeriodicWave>> {
+  return {
+    sharktooth: createPeriodicWave(context, (harmonic) => (harmonic % 2 === 0 ? 0.38 / harmonic : 1 / harmonic)),
+    "reverse-saw": createPeriodicWave(context, (harmonic) => -1 / harmonic),
+    "wide-pulse": createPeriodicWave(context, (harmonic) => (2 * Math.sin(Math.PI * harmonic * 0.72)) / (Math.PI * harmonic)),
+    "narrow-pulse": createPeriodicWave(context, (harmonic) => (2 * Math.sin(Math.PI * harmonic * 0.18)) / (Math.PI * harmonic)),
+  };
+}
+
+function applyWaveform(
+  source: OscillatorNode,
+  wave: OscillatorWave,
+  periodicWaves: Partial<Record<OscillatorWave, PeriodicWave>>,
+): void {
+  if (wave === "triangle" || wave === "sawtooth" || wave === "square") {
+    source.type = WAVEFORMS[wave];
+    return;
+  }
+
+  const periodicWave = periodicWaves[wave];
+  if (periodicWave) source.setPeriodicWave(periodicWave);
+}
+
 export class SynthEngine {
   #graph: SynthGraph | null = null;
   #patch: SynthPatch;
@@ -74,6 +114,14 @@ export class SynthEngine {
     await this.#readyPromise;
   }
 
+  async unlock(): Promise<void> {
+    await this.ensureReady();
+    if (!this.#graph) return;
+    if (this.#graph.context.state !== "running") {
+      await this.#graph.context.resume();
+    }
+  }
+
   getAnalyser(): AnalyserNode | null {
     return this.#graph?.analyser ?? null;
   }
@@ -82,17 +130,18 @@ export class SynthEngine {
     this.#patch = nextPatch;
     if (!this.#graph) return;
 
-    const { context, master, contour, oscillatorNodes, noiseGain, filter, pitchModGain, filterModGain } = this.#graph;
+    const { context, master, contour, oscillatorNodes, noiseLevelGain, filter, pitchModGain, filterModGain, periodicWaves } =
+      this.#graph;
     const now = context.currentTime;
 
     master.gain.setTargetAtTime(nextPatch.output.masterVolume, now, 0.02);
     contour.gain.setTargetAtTime(nextPatch.filter.contourAmount * 2200, now, 0.02);
-    noiseGain.gain.setTargetAtTime(nextPatch.noiseVolume, now, 0.02);
+    noiseLevelGain.gain.setTargetAtTime(nextPatch.noise.enabled ? nextPatch.noise.volume : 0, now, 0.02);
 
     oscillatorNodes.forEach((node, index) => {
       const osc = nextPatch.oscillators[index];
       node.mixGain.gain.setTargetAtTime(osc.enabled && !osc.lfoMode ? osc.mixerVolume : 0, now, 0.02);
-      node.source.type = WAVEFORMS[osc.wave];
+      applyWaveform(node.source, osc.wave, periodicWaves);
       node.pitchGain.gain.setTargetAtTime(this.#pitchModAmount(nextPatch.modulation.destination), now, 0.02);
       node.source.detune.setTargetAtTime(this.#detuneForOscillator(osc), now, 0.02);
     });
@@ -110,7 +159,7 @@ export class SynthEngine {
   }
 
   async noteOn(note: number): Promise<void> {
-    await this.ensureReady();
+    await this.unlock();
     if (!this.#graph) return;
 
     const existingIndex = this.#voice.heldNotes.indexOf(note);
@@ -154,7 +203,8 @@ export class SynthEngine {
 
   async #init(): Promise<void> {
     const context = new AudioContext({ latencyHint: "interactive" });
-    await context.audioWorklet.addModule("/worklets/moog-ladder.worklet.js");
+    const workletUrl = `${import.meta.env.BASE_URL}worklets/moog-ladder.worklet.js`;
+    await context.audioWorklet.addModule(workletUrl);
 
     const analyser = context.createAnalyser();
     analyser.fftSize = 2048;
@@ -166,6 +216,7 @@ export class SynthEngine {
     const contourSource = context.createConstantSource();
     const pitchModGain = context.createGain();
     const filterModGain = context.createGain();
+    const periodicWaves = createPeriodicWaves(context);
 
     const filter = new AudioWorkletNode(context, "moog-ladder-filter", {
       numberOfInputs: 1,
@@ -183,7 +234,7 @@ export class SynthEngine {
       const mixGain = context.createGain();
       const pitchGain = context.createGain();
 
-      source.type = WAVEFORMS[osc.wave];
+      applyWaveform(source, osc.wave, periodicWaves);
       source.connect(mixGain).connect(mixer);
       source.connect(pitchGain);
       pitchGain.connect(source.detune);
@@ -195,11 +246,13 @@ export class SynthEngine {
     });
 
     const noiseSource = context.createBufferSource();
-    noiseSource.buffer = this.#createNoiseBuffer(context);
+    noiseSource.buffer = this.#createNoiseBuffer(context, this.#patch.noise.color);
     noiseSource.loop = true;
-    const noiseGain = context.createGain();
-    noiseGain.gain.value = this.#patch.noiseVolume;
-    noiseSource.connect(noiseGain).connect(mixer);
+    const noiseLevelGain = context.createGain();
+    const noiseEnvelopeGain = context.createGain();
+    noiseLevelGain.gain.value = this.#patch.noise.enabled ? this.#patch.noise.volume : 0;
+    noiseEnvelopeGain.gain.value = 0;
+    noiseSource.connect(noiseLevelGain).connect(noiseEnvelopeGain).connect(mixer);
     noiseSource.start();
 
     contourSource.offset.value = 1;
@@ -207,7 +260,7 @@ export class SynthEngine {
     contourSource.start();
 
     mixer.connect(filter).connect(amp).connect(master).connect(analyser).connect(context.destination);
-    amp.gain.value = 0.0001;
+    amp.gain.value = 0;
     master.gain.value = this.#patch.output.masterVolume;
 
     const lfoNode = oscillatorNodes[2];
@@ -231,21 +284,22 @@ export class SynthEngine {
       filterModGain,
       oscillatorNodes,
       noiseSource,
-      noiseGain,
+      noiseLevelGain,
+      noiseEnvelopeGain,
+      periodicWaves,
     };
 
     this.updatePatch(this.#patch);
-    await context.resume();
   }
 
-  #createNoiseBuffer(context: AudioContext): AudioBuffer {
+  #createNoiseBuffer(context: AudioContext, color: SynthPatch["noise"]["color"]): AudioBuffer {
     const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
     const data = buffer.getChannelData(0);
     let last = 0;
 
     for (let index = 0; index < data.length; index += 1) {
       const white = Math.random() * 2 - 1;
-      if (this.#patch.noiseColor === "pink") {
+      if (color === "pink") {
         last = 0.98 * last + 0.02 * white;
         data[index] = clamp(last * 4, -1, 1);
       } else {
@@ -325,11 +379,13 @@ export class SynthEngine {
       amp.gain.linearRampToValueAtTime(1, now + seconds(attack));
       const sustainLevel = this.#patch.amplifier.decayEnabled ? sustain : 1;
       amp.gain.linearRampToValueAtTime(sustainLevel, now + seconds(attack) + seconds(decay));
+      this.#triggerNoiseEnvelope(true);
       return;
     }
 
     amp.gain.setValueAtTime(Math.max(amp.gain.value, 0.0001), now);
-    amp.gain.linearRampToValueAtTime(0.0001, now + seconds(release));
+    amp.gain.linearRampToValueAtTime(0, now + seconds(release));
+    this.#triggerNoiseEnvelope(false);
   }
 
   #triggerFilterEnvelope(noteOn: boolean): void {
@@ -352,5 +408,30 @@ export class SynthEngine {
 
     contour.gain.setValueAtTime(Math.max(contour.gain.value, 0), now);
     contour.gain.linearRampToValueAtTime(0, now + seconds(release));
+  }
+
+  #triggerNoiseEnvelope(noteOn: boolean): void {
+    if (!this.#graph) return;
+
+    const { context, noiseEnvelopeGain } = this.#graph;
+    const { attack, decay, sustain, release } = this.#patch.noise.envelope;
+    const now = context.currentTime;
+
+    noiseEnvelopeGain.gain.cancelScheduledValues(now);
+
+    if (!this.#patch.noise.enabled) {
+      noiseEnvelopeGain.gain.setValueAtTime(0, now);
+      return;
+    }
+
+    if (noteOn) {
+      noiseEnvelopeGain.gain.setValueAtTime(0, now);
+      noiseEnvelopeGain.gain.linearRampToValueAtTime(1, now + seconds(attack));
+      noiseEnvelopeGain.gain.linearRampToValueAtTime(sustain, now + seconds(attack) + seconds(decay));
+      return;
+    }
+
+    noiseEnvelopeGain.gain.setValueAtTime(Math.max(noiseEnvelopeGain.gain.value, 0), now);
+    noiseEnvelopeGain.gain.linearRampToValueAtTime(0, now + seconds(release));
   }
 }
