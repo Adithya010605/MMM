@@ -5,9 +5,18 @@ import { DiscreteKnob } from "./components/DiscreteKnob";
 import { Toggle } from "./components/Toggle";
 import { WaveformScope } from "./components/WaveformScope";
 import { FilterScope } from "./components/FilterScope";
+import { AmplitudeScope } from "./components/AmplitudeScope";
 import { useSynthEngine } from "./audio/engine/useSynthEngine";
 import { useKeyboardSynth } from "./hooks/useKeyboardSynth";
 import type { ModulationDestination, NoiseColor, OscillatorRange, OscillatorWave, SynthPatch } from "./types/synth";
+
+type LoopUiState = {
+  hasLoop: boolean;
+  isPlaying: boolean;
+  isRecording: boolean;
+  duration: number;
+  mode: "replace" | "overdub" | null;
+};
 
 const RANGE_OPTIONS: { label: string; value: OscillatorRange }[] = [
   { label: "Lo", value: "lo" },
@@ -49,12 +58,29 @@ export function App() {
   const [patch, setPatch] = useState(defaultPatch);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [loopState, setLoopState] = useState<LoopUiState>({
+    hasLoop: false,
+    isPlaying: false,
+    isRecording: false,
+    duration: 0,
+    mode: null,
+  });
   const deferredPatch = useDeferredValue(patch);
   const engineRef = useSynthEngine(deferredPatch);
   useKeyboardSynth(engineRef);
 
   const analyser = engineRef.current?.getAnalyser() ?? null;
   const signalSummary = deferredPatch.oscillators.map((oscillator) => `${oscillator.id}:${oscillator.wave}`).join(" / ");
+
+  useEffect(() => {
+    setLoopState(engineRef.current?.getLoopSnapshot() ?? {
+      hasLoop: false,
+      isPlaying: false,
+      isRecording: false,
+      duration: 0,
+      mode: null,
+    });
+  }, [engineRef]);
 
   const setOscillator = (index: number, recipe: (oscillator: SynthPatch["oscillators"][number]) => SynthPatch["oscillators"][number]) => {
     updatePatch(setPatch, (current) => ({
@@ -73,6 +99,38 @@ export function App() {
     } catch {
       setAudioError("Audio could not start. Reload and allow browser audio.");
     }
+  }
+
+  async function startLoopRecording(mode: "replace" | "overdub"): Promise<void> {
+    try {
+      await armAudio();
+      const snapshot = await engineRef.current?.startLoopRecording(mode);
+      if (snapshot) setLoopState(snapshot);
+    } catch (error) {
+      setAudioError(error instanceof Error ? error.message : "Loop recording could not start.");
+    }
+  }
+
+  async function stopLoopRecording(): Promise<void> {
+    try {
+      const snapshot = await engineRef.current?.stopLoopRecording();
+      if (snapshot) setLoopState(snapshot);
+    } catch (error) {
+      setAudioError(error instanceof Error ? error.message : "Loop recording could not stop.");
+    }
+  }
+
+  async function toggleLoopPlayback(): Promise<void> {
+    try {
+      const snapshot = await engineRef.current?.setLoopPlayback(!loopState.isPlaying);
+      if (snapshot) setLoopState(snapshot);
+    } catch (error) {
+      setAudioError(error instanceof Error ? error.message : "Loop playback could not change.");
+    }
+  }
+
+  function clearLoop(): void {
+    setLoopState(engineRef.current?.clearLoop() ?? loopState);
   }
 
   useEffect(() => {
@@ -126,6 +184,43 @@ export function App() {
             <p className="signal-arrow">MIXER  →  LADDER FILTER  →  AMP</p>
             <p className="signal-value">Hardwired monophonic path</p>
             <p className="signal-detail">{signalSummary}</p>
+
+            <div className="looper-card">
+              <div className="looper-head">
+                <p className="signal-label">Looper</p>
+                <span className="mini-readout">
+                  {loopState.hasLoop ? `${loopState.duration.toFixed(1)}s` : "Empty"}
+                </span>
+              </div>
+              <div className="looper-actions">
+                <button
+                  type="button"
+                  className={loopState.isRecording && loopState.mode === "replace" ? "arm-button is-live" : "arm-button"}
+                  onClick={() => (loopState.isRecording ? void stopLoopRecording() : void startLoopRecording("replace"))}
+                >
+                  {loopState.isRecording && loopState.mode === "replace" ? "Stop Rec" : "Record"}
+                </button>
+                <button
+                  type="button"
+                  className={loopState.isRecording && loopState.mode === "overdub" ? "arm-button is-live" : "arm-button"}
+                  onClick={() => (loopState.isRecording ? void stopLoopRecording() : void startLoopRecording("overdub"))}
+                  disabled={!loopState.hasLoop && !loopState.isRecording}
+                >
+                  {loopState.isRecording && loopState.mode === "overdub" ? "Stop Dub" : "Overdub"}
+                </button>
+                <button
+                  type="button"
+                  className={loopState.isPlaying ? "arm-button is-live" : "arm-button"}
+                  onClick={() => void toggleLoopPlayback()}
+                  disabled={!loopState.hasLoop || loopState.isRecording}
+                >
+                  {loopState.isPlaying ? "Stop Loop" : "Play Loop"}
+                </button>
+                <button type="button" className="arm-button" onClick={clearLoop} disabled={!loopState.hasLoop && !loopState.isRecording}>
+                  Clear
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -450,6 +545,16 @@ export function App() {
             <div className="module-head">
               <p className="eyebrow">Amplitude</p>
               <h2>Loudness Contour</h2>
+            </div>
+
+            <div className="amplitude-top">
+              <AmplitudeScope
+                attack={patch.amplifier.envelope.attack}
+                decay={patch.amplifier.envelope.decay}
+                sustain={patch.amplifier.envelope.sustain}
+                release={patch.amplifier.envelope.release}
+                decayEnabled={patch.amplifier.decayEnabled}
+              />
             </div>
 
             <div className="knob-row knob-row-wide">

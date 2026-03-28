@@ -26,7 +26,7 @@ body {
   min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
-  font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
+  font-family: "SF Pro Display", "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
 }
 
 button,
@@ -205,6 +205,27 @@ h2 {
   font-size: 0.76rem;
 }
 
+.looper-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.looper-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.looper-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .flow-pill-row {
   display: flex;
   flex-wrap: wrap;
@@ -310,6 +331,11 @@ h2 {
   margin-bottom: 10px;
 }
 
+.amplitude-top {
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+
 .filter-scope-frame {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -321,6 +347,19 @@ h2 {
   display: block;
   width: 100%;
   height: 168px;
+}
+
+.amp-scope-frame {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px;
+  background: #0c0c0c;
+}
+
+.amp-scope {
+  display: block;
+  width: 100%;
+  height: 132px;
 }
 
 .filter-grid {
@@ -358,6 +397,18 @@ h2 {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 0;
+}
+
+.amp-area {
+  fill: url(#amp-fill);
+}
+
+.amp-curve {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .osc-grid {
@@ -416,19 +467,31 @@ h2 {
 .arm-button {
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
-  background: #111111;
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(245, 245, 245, 0.92);
   cursor: pointer;
   font-weight: 600;
   font-size: 0.72rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 4px 10px rgba(0, 0, 0, 0.16);
+}
+
+.arm-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .arm-button.is-live {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #050505;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 6px 14px rgba(0, 0, 0, 0.18);
 }
 
 .selector:hover,
@@ -456,11 +519,15 @@ h2 {
   min-height: 30px;
   padding: 0 8px;
   border-color: rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+  background: rgba(255, 255, 255, 0.03);
   color: rgba(245, 245, 245, 0.88);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     0 4px 10px rgba(0, 0, 0, 0.18);
+}
+
+.toggle-label {
+  font-weight: 500;
 }
 
 .toggle-pill {
@@ -471,32 +538,41 @@ h2 {
   padding: 2px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.4);
 }
 
 .toggle-dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.28);
   transform: translateX(0);
 }
 
 .toggle.is-on .toggle-dot {
   transform: translateX(10px);
-  background: #0f0f0f;
+  background: #101010;
 }
 
 .toggle.is-on {
-  border-color: rgba(255, 255, 255, 0.24);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.1));
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
   color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 6px 12px rgba(0, 0, 0, 0.2);
 }
 
 .toggle.is-on .toggle-pill {
-  background: rgba(15, 15, 15, 0.12);
-  border-color: rgba(15, 15, 15, 0.08);
+  background: #f1f1f1;
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 0 1px rgba(0, 0, 0, 0.12);
 }
 
 .knob-row {

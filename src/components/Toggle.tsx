@@ -12,7 +12,7 @@ export function Toggle({ label, checked, onChange }: ToggleProps) {
       aria-pressed={checked}
       onClick={() => onChange(!checked)}
     >
-      <span>{label}</span>
+      <span className="toggle-label">{label}</span>
       <span className="toggle-pill">
         <span className="toggle-dot" />
       </span>

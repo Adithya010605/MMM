@@ -11,6 +11,7 @@ type SynthGraph = {
   analyser: AnalyserNode;
   master: GainNode;
   amp: GainNode;
+  loopGain: GainNode;
   filter: AudioWorkletNode;
   mixer: GainNode;
   contour: GainNode;
@@ -26,7 +27,28 @@ type SynthGraph = {
   noiseSource: AudioBufferSourceNode;
   noiseLevelGain: GainNode;
   noiseEnvelopeGain: GainNode;
+  mediaDestination: MediaStreamAudioDestinationNode;
   periodicWaves: Partial<Record<OscillatorWave, PeriodicWave>>;
+};
+
+type LoopRecordingMode = "replace" | "overdub";
+
+type LoopSnapshot = {
+  hasLoop: boolean;
+  isPlaying: boolean;
+  isRecording: boolean;
+  duration: number;
+  mode: LoopRecordingMode | null;
+};
+
+type LoopState = {
+  buffer: AudioBuffer | null;
+  source: AudioBufferSourceNode | null;
+  recorder: MediaRecorder | null;
+  chunks: Blob[];
+  isPlaying: boolean;
+  isRecording: boolean;
+  mode: LoopRecordingMode | null;
 };
 
 const RANGE_OFFSETS: Record<OscillatorPatch["range"], number> = {
@@ -100,6 +122,15 @@ export class SynthEngine {
   #patch: SynthPatch;
   #voice: VoiceState = { activeNote: null, heldNotes: [] };
   #readyPromise: Promise<void> | null = null;
+  #loop: LoopState = {
+    buffer: null,
+    source: null,
+    recorder: null,
+    chunks: [],
+    isPlaying: false,
+    isRecording: false,
+    mode: null,
+  };
 
   constructor(initialPatch: SynthPatch) {
     this.#patch = initialPatch;
@@ -125,6 +156,113 @@ export class SynthEngine {
 
   getAnalyser(): AnalyserNode | null {
     return this.#graph?.analyser ?? null;
+  }
+
+  getLoopSnapshot(): LoopSnapshot {
+    return {
+      hasLoop: this.#loop.buffer !== null,
+      isPlaying: this.#loop.isPlaying,
+      isRecording: this.#loop.isRecording,
+      duration: this.#loop.buffer?.duration ?? 0,
+      mode: this.#loop.mode,
+    };
+  }
+
+  async startLoopRecording(mode: LoopRecordingMode): Promise<LoopSnapshot> {
+    await this.unlock();
+    if (!this.#graph) return this.getLoopSnapshot();
+    if (typeof MediaRecorder === "undefined") {
+      throw new Error("This browser does not support loop recording.");
+    }
+    if (this.#loop.isRecording) return this.getLoopSnapshot();
+
+    if (mode === "replace") {
+      this.stopLoopPlayback();
+    } else if (this.#loop.buffer) {
+      this.stopLoopPlayback();
+      this.startLoopPlayback(true);
+    }
+
+    const recorder = new MediaRecorder(this.#graph.mediaDestination.stream);
+    const chunks: Blob[] = [];
+
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    });
+
+    this.#loop.recorder = recorder;
+    this.#loop.chunks = chunks;
+    this.#loop.isRecording = true;
+    this.#loop.mode = mode;
+    recorder.start();
+
+    return this.getLoopSnapshot();
+  }
+
+  async stopLoopRecording(): Promise<LoopSnapshot> {
+    if (!this.#graph || !this.#loop.recorder || !this.#loop.isRecording) {
+      return this.getLoopSnapshot();
+    }
+
+    const { recorder } = this.#loop;
+
+    const recordingStopped = new Promise<Blob>((resolve, reject) => {
+      recorder.addEventListener(
+        "stop",
+        () => {
+          try {
+            resolve(new Blob(this.#loop.chunks, { type: recorder.mimeType || "audio/webm" }));
+          } catch (error) {
+            reject(error);
+          }
+        },
+        { once: true },
+      );
+      recorder.addEventListener("error", () => reject(new Error("Loop recording failed.")), { once: true });
+    });
+
+    recorder.requestData();
+    recorder.stop();
+
+    const blob = await recordingStopped;
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer = await this.#graph.context.decodeAudioData(arrayBuffer.slice(0));
+    const nextLoopBuffer =
+      this.#loop.mode === "overdub" && this.#loop.buffer
+        ? this.#mergeLoopBuffers(this.#loop.buffer, audioBuffer, this.#graph.context)
+        : audioBuffer;
+
+    this.#loop.buffer = nextLoopBuffer;
+    this.#loop.recorder = null;
+    this.#loop.chunks = [];
+    this.#loop.isRecording = false;
+    this.#loop.mode = null;
+
+    this.startLoopPlayback(true);
+    return this.getLoopSnapshot();
+  }
+
+  async setLoopPlayback(enabled: boolean): Promise<LoopSnapshot> {
+    await this.unlock();
+    if (enabled) {
+      this.startLoopPlayback();
+    } else {
+      this.stopLoopPlayback();
+    }
+    return this.getLoopSnapshot();
+  }
+
+  clearLoop(): LoopSnapshot {
+    this.stopLoopPlayback();
+    if (this.#loop.recorder && this.#loop.isRecording) {
+      this.#loop.recorder.stop();
+    }
+    this.#loop.buffer = null;
+    this.#loop.recorder = null;
+    this.#loop.chunks = [];
+    this.#loop.isRecording = false;
+    this.#loop.mode = null;
+    return this.getLoopSnapshot();
   }
 
   updatePatch(nextPatch: SynthPatch): void {
@@ -213,12 +351,14 @@ export class SynthEngine {
 
     const master = context.createGain();
     const amp = context.createGain();
+    const loopGain = context.createGain();
     const mixer = context.createGain();
     const contour = context.createGain();
     const contourSource = context.createConstantSource();
     const lfoSourceGain = context.createGain();
     const pitchModGain = context.createGain();
     const filterModGain = context.createGain();
+    const mediaDestination = context.createMediaStreamDestination();
     const periodicWaves = createPeriodicWaves(context);
 
     const filter = new AudioWorkletNode(context, "moog-ladder-filter", {
@@ -262,8 +402,13 @@ export class SynthEngine {
     contourSource.connect(contour).connect(filter.parameters.get("cutoff")!);
     contourSource.start();
 
-    mixer.connect(filter).connect(amp).connect(master).connect(analyser).connect(context.destination);
+    mixer.connect(filter).connect(amp).connect(master);
+    amp.connect(mediaDestination);
+    loopGain.connect(master);
+    master.connect(analyser);
+    analyser.connect(context.destination);
     amp.gain.value = 0;
+    loopGain.gain.value = 1;
     master.gain.value = this.#patch.output.masterVolume;
 
     const lfoNode = oscillatorNodes[2];
@@ -278,6 +423,7 @@ export class SynthEngine {
       analyser,
       master,
       amp,
+      loopGain,
       filter,
       mixer,
       contour,
@@ -289,6 +435,7 @@ export class SynthEngine {
       noiseSource,
       noiseLevelGain,
       noiseEnvelopeGain,
+      mediaDestination,
       periodicWaves,
     };
 
@@ -436,5 +583,58 @@ export class SynthEngine {
 
     noiseEnvelopeGain.gain.setValueAtTime(Math.max(noiseEnvelopeGain.gain.value, 0), now);
     noiseEnvelopeGain.gain.linearRampToValueAtTime(0, now + seconds(release));
+  }
+
+  startLoopPlayback(fromStart = false): void {
+    if (!this.#graph || !this.#loop.buffer || this.#loop.isRecording) return;
+    if (this.#loop.isPlaying && !fromStart) return;
+    if (this.#loop.isPlaying && fromStart) this.stopLoopPlayback();
+
+    const source = this.#graph.context.createBufferSource();
+    source.buffer = this.#loop.buffer;
+    source.loop = true;
+    source.connect(this.#graph.loopGain);
+    source.addEventListener("ended", () => {
+      if (this.#loop.source === source) {
+        this.#loop.source = null;
+        this.#loop.isPlaying = false;
+      }
+    });
+    source.start();
+    this.#loop.source = source;
+    this.#loop.isPlaying = true;
+  }
+
+  stopLoopPlayback(): void {
+    const source = this.#loop.source;
+    if (!source) {
+      this.#loop.isPlaying = false;
+      return;
+    }
+
+    this.#loop.source = null;
+    this.#loop.isPlaying = false;
+    source.stop();
+    source.disconnect();
+  }
+
+  #mergeLoopBuffers(base: AudioBuffer, overdub: AudioBuffer, context: BaseAudioContext): AudioBuffer {
+    const channels = Math.max(base.numberOfChannels, overdub.numberOfChannels);
+    const merged = context.createBuffer(channels, base.length, base.sampleRate);
+
+    for (let channelIndex = 0; channelIndex < channels; channelIndex += 1) {
+      const output = merged.getChannelData(channelIndex);
+      const baseData = base.getChannelData(Math.min(channelIndex, base.numberOfChannels - 1));
+      const overdubData = overdub.getChannelData(Math.min(channelIndex, overdub.numberOfChannels - 1));
+
+      output.set(baseData.subarray(0, base.length));
+
+      for (let sampleIndex = 0; sampleIndex < overdub.length; sampleIndex += 1) {
+        const loopIndex = sampleIndex % base.length;
+        output[loopIndex] = clamp(output[loopIndex] + overdubData[sampleIndex], -1, 1);
+      }
+    }
+
+    return merged;
   }
 }
