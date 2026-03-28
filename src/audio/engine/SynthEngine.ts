@@ -15,6 +15,7 @@ type SynthGraph = {
   mixer: GainNode;
   contour: GainNode;
   contourSource: ConstantSourceNode;
+  lfoSourceGain: GainNode;
   pitchModGain: GainNode;
   filterModGain: GainNode;
   oscillatorNodes: Array<{
@@ -130,13 +131,14 @@ export class SynthEngine {
     this.#patch = nextPatch;
     if (!this.#graph) return;
 
-    const { context, master, contour, oscillatorNodes, noiseLevelGain, filter, pitchModGain, filterModGain, periodicWaves } =
+    const { context, master, contour, lfoSourceGain, oscillatorNodes, noiseLevelGain, filter, pitchModGain, filterModGain, periodicWaves } =
       this.#graph;
     const now = context.currentTime;
 
     master.gain.setTargetAtTime(nextPatch.output.masterVolume, now, 0.02);
     contour.gain.setTargetAtTime(nextPatch.filter.contourAmount * 2200, now, 0.02);
     noiseLevelGain.gain.setTargetAtTime(nextPatch.noise.enabled ? nextPatch.noise.volume : 0, now, 0.02);
+    lfoSourceGain.gain.setTargetAtTime(nextPatch.oscillators[2].lfoMode ? 1 : 0, now, 0.02);
 
     oscillatorNodes.forEach((node, index) => {
       const osc = nextPatch.oscillators[index];
@@ -214,6 +216,7 @@ export class SynthEngine {
     const mixer = context.createGain();
     const contour = context.createGain();
     const contourSource = context.createConstantSource();
+    const lfoSourceGain = context.createGain();
     const pitchModGain = context.createGain();
     const filterModGain = context.createGain();
     const periodicWaves = createPeriodicWaves(context);
@@ -236,8 +239,8 @@ export class SynthEngine {
 
       applyWaveform(source, osc.wave, periodicWaves);
       source.connect(mixGain).connect(mixer);
-      source.connect(pitchGain);
       pitchGain.connect(source.detune);
+      pitchModGain.connect(pitchGain);
 
       mixGain.gain.value = osc.enabled && !osc.lfoMode ? osc.mixerVolume : 0;
       source.start();
@@ -264,11 +267,10 @@ export class SynthEngine {
     master.gain.value = this.#patch.output.masterVolume;
 
     const lfoNode = oscillatorNodes[2];
-    lfoNode.source.connect(pitchModGain);
-    lfoNode.source.connect(filterModGain);
-
-    pitchModGain.connect(oscillatorNodes[0].source.detune);
-    pitchModGain.connect(oscillatorNodes[1].source.detune);
+    lfoSourceGain.gain.value = this.#patch.oscillators[2].lfoMode ? 1 : 0;
+    lfoNode.source.connect(lfoSourceGain);
+    lfoSourceGain.connect(pitchModGain);
+    lfoSourceGain.connect(filterModGain);
     filterModGain.connect(filter.parameters.get("cutoff")!);
 
     this.#graph = {
@@ -280,6 +282,7 @@ export class SynthEngine {
       mixer,
       contour,
       contourSource,
+      lfoSourceGain,
       pitchModGain,
       filterModGain,
       oscillatorNodes,
@@ -316,15 +319,15 @@ export class SynthEngine {
   }
 
   #pitchModAmount(destination: ModulationDestination): number {
-    return destination === "oscillator" || destination === "mix" ? 100 : 0;
+    return destination === "oscillator" || destination === "mix" ? 1 : 0;
   }
 
   #filterModDepth(destination: ModulationDestination): number {
-    return destination === "filter" || destination === "mix" ? this.#modDepth() * 10 : 0;
+    return destination === "filter" || destination === "mix" ? this.#modDepth() * 180 : 0;
   }
 
   #modDepth(): number {
-    return this.#patch.modulation.wheel * 38 * (0.35 + this.#patch.modulation.mix);
+    return this.#patch.modulation.wheel * (0.15 + this.#patch.modulation.mix * 0.85) * 24;
   }
 
   #setOscillatorFrequencies(note: number, legato: boolean): void {

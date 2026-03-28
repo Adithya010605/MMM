@@ -1,7 +1,7 @@
 import { startTransition, useDeferredValue, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { defaultPatch } from "./config/defaultPatch";
 import { Knob } from "./components/Knob";
-import { Selector } from "./components/Selector";
+import { DiscreteKnob } from "./components/DiscreteKnob";
 import { Toggle } from "./components/Toggle";
 import { WaveformScope } from "./components/WaveformScope";
 import { Keyboard } from "./components/Keyboard";
@@ -19,13 +19,13 @@ const RANGE_OPTIONS: { label: string; value: OscillatorRange }[] = [
 ];
 
 const WAVE_OPTIONS: { label: string; value: OscillatorWave }[] = [
-  { label: "Tri", value: "triangle" },
-  { label: "Shark", value: "sharktooth" },
-  { label: "Saw", value: "sawtooth" },
-  { label: "Rev", value: "reverse-saw" },
-  { label: "Sq", value: "square" },
-  { label: "Wide", value: "wide-pulse" },
-  { label: "Narrow", value: "narrow-pulse" },
+  { label: "△", value: "triangle" },
+  { label: "◁", value: "sharktooth" },
+  { label: "╱", value: "sawtooth" },
+  { label: "╲", value: "reverse-saw" },
+  { label: "▢", value: "square" },
+  { label: "▰", value: "wide-pulse" },
+  { label: "▮", value: "narrow-pulse" },
 ];
 
 const NOISE_OPTIONS: { label: string; value: NoiseColor }[] = [
@@ -104,6 +104,13 @@ export function App() {
           </div>
         </div>
 
+        <div className="arm-bar">
+          <button type="button" className={audioEnabled ? "arm-button is-live" : "arm-button"} onClick={() => void armAudio()}>
+            {audioEnabled ? "Audio Enabled" : "Click To Enable Audio"}
+          </button>
+          {audioError ? <p className="signal-detail">{audioError}</p> : null}
+        </div>
+
         <div className="display-grid">
           <div className="scope-frame">
             <WaveformScope analyser={analyser} />
@@ -114,10 +121,6 @@ export function App() {
             <p className="signal-arrow">MIXER &gt; LADDER FILTER &gt; AMP</p>
             <p className="signal-detail">{signalSummary}</p>
             <p className="signal-detail">Keys: Z-M / Q-I</p>
-            <button type="button" className={audioEnabled ? "arm-button is-live" : "arm-button"} onClick={() => void armAudio()}>
-              {audioEnabled ? "Audio Live" : "Enable Audio"}
-            </button>
-            {audioError ? <p className="signal-detail">{audioError}</p> : null}
           </div>
         </div>
       </section>
@@ -137,14 +140,14 @@ export function App() {
                   <span className="mini-readout">{oscillator.wave}</span>
                 </div>
 
-                <Selector
+                <DiscreteKnob
                   label={`Oscillator ${oscillator.id} range`}
                   value={oscillator.range}
                   options={RANGE_OPTIONS}
                   onChange={(range) => setOscillator(index, (current) => ({ ...current, range }))}
                 />
 
-                <Selector
+                <DiscreteKnob
                   label={`Oscillator ${oscillator.id} waveform`}
                   value={oscillator.wave}
                   options={WAVE_OPTIONS}
@@ -205,7 +208,7 @@ export function App() {
           </div>
 
           <div className="module-grid">
-            <Selector
+            <DiscreteKnob
               label="Noise Color"
               value={patch.noise.color}
               options={NOISE_OPTIONS}
@@ -522,7 +525,7 @@ export function App() {
             <h2>Modulation And Glide</h2>
           </div>
 
-          <Selector
+          <DiscreteKnob
             label="Mod Destination"
             value={patch.modulation.destination}
             options={MOD_DEST_OPTIONS}

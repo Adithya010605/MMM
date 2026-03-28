@@ -17,7 +17,7 @@ export function useKeyboardSynth(engineRef: MutableRefObject<SynthEngine | null>
       if (note === undefined) return;
 
       activeCodesRef.current.add(event.code);
-      void engineRef.current?.noteOn(note);
+      void engineRef.current?.unlock().then(() => engineRef.current?.noteOn(note));
       event.preventDefault();
     };
 
