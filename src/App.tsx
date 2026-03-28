@@ -4,7 +4,7 @@ import { Knob } from "./components/Knob";
 import { DiscreteKnob } from "./components/DiscreteKnob";
 import { Toggle } from "./components/Toggle";
 import { WaveformScope } from "./components/WaveformScope";
-import { Keyboard } from "./components/Keyboard";
+import { FilterScope } from "./components/FilterScope";
 import { useSynthEngine } from "./audio/engine/useSynthEngine";
 import { useKeyboardSynth } from "./hooks/useKeyboardSynth";
 import type { ModulationDestination, NoiseColor, OscillatorRange, OscillatorWave, SynthPatch } from "./types/synth";
@@ -113,14 +113,19 @@ export function App() {
 
         <div className="display-grid">
           <div className="scope-frame">
-            <WaveformScope analyser={analyser} />
+            <WaveformScope analyser={analyser} oscillators={deferredPatch.oscillators} />
           </div>
           <div className="signal-card">
             <p className="signal-label">Signal Flow</p>
-            <p className="signal-value">OSC 1 / OSC 2 / OSC 3 / NOISE / EXT</p>
-            <p className="signal-arrow">MIXER &gt; LADDER FILTER &gt; AMP</p>
+            <div className="flow-pill-row">
+              <span className="flow-pill">OSC 1</span>
+              <span className="flow-pill">OSC 2</span>
+              <span className="flow-pill">OSC 3</span>
+              <span className="flow-pill">NOISE</span>
+            </div>
+            <p className="signal-arrow">MIXER  →  LADDER FILTER  →  AMP</p>
+            <p className="signal-value">Hardwired monophonic path</p>
             <p className="signal-detail">{signalSummary}</p>
-            <p className="signal-detail">Keys: Z-M / Q-I</p>
           </div>
         </div>
       </section>
@@ -134,25 +139,11 @@ export function App() {
 
           <div className="osc-grid">
             {patch.oscillators.map((oscillator, index) => (
-              <div key={oscillator.id} className="osc-card">
+              <div key={oscillator.id} className={`osc-card osc-card-${oscillator.id} ${oscillator.enabled ? "is-enabled" : ""}`}>
                 <div className="osc-title">
                   <span>{`Osc ${oscillator.id}`}</span>
                   <span className="mini-readout">{oscillator.wave}</span>
                 </div>
-
-                <DiscreteKnob
-                  label={`Oscillator ${oscillator.id} range`}
-                  value={oscillator.range}
-                  options={RANGE_OPTIONS}
-                  onChange={(range) => setOscillator(index, (current) => ({ ...current, range }))}
-                />
-
-                <DiscreteKnob
-                  label={`Oscillator ${oscillator.id} waveform`}
-                  value={oscillator.wave}
-                  options={WAVE_OPTIONS}
-                  onChange={(wave) => setOscillator(index, (current) => ({ ...current, wave }))}
-                />
 
                 <div className="knob-row">
                   <Knob
@@ -173,6 +164,19 @@ export function App() {
                     formatValue={(value) => `${Math.round(value * 10)}`}
                     onChange={(mixerVolume) => setOscillator(index, (current) => ({ ...current, mixerVolume }))}
                   />
+                  <DiscreteKnob
+                    label={`Oscillator ${oscillator.id} range`}
+                    value={oscillator.range}
+                    options={RANGE_OPTIONS}
+                    onChange={(range) => setOscillator(index, (current) => ({ ...current, range }))}
+                  />
+
+                  <DiscreteKnob
+                    label={`Oscillator ${oscillator.id} waveform`}
+                    value={oscillator.wave}
+                    options={WAVE_OPTIONS}
+                    onChange={(wave) => setOscillator(index, (current) => ({ ...current, wave }))}
+                  />
                 </div>
 
                 <div className="toggle-row">
@@ -187,39 +191,32 @@ export function App() {
                       checked={oscillator.keyboardTracking}
                       onChange={(keyboardTracking) => setOscillator(index, (current) => ({ ...current, keyboardTracking }))}
                     />
-                  ) : null}
+                  ) : (
+                    <div className="toggle-spacer" aria-hidden="true" />
+                  )}
                   {oscillator.id === 3 ? (
                     <Toggle
                       label="VCO 3 as LFO"
                       checked={oscillator.lfoMode}
                       onChange={(lfoMode) => setOscillator(index, (current) => ({ ...current, lfoMode, keyboardTracking: !lfoMode }))}
                     />
-                  ) : null}
+                  ) : (
+                    <div className="toggle-spacer" aria-hidden="true" />
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </article>
 
-        <article className="module">
-          <div className="module-head">
-            <p className="eyebrow">Mixer</p>
-            <h2>Noise And Input</h2>
-          </div>
+        <div className="middle-grid">
+          <article className="module">
+            <div className="module-head">
+              <p className="eyebrow">Mixer</p>
+              <h2>Noise And Input</h2>
+            </div>
 
-          <div className="module-grid">
-            <DiscreteKnob
-              label="Noise Color"
-              value={patch.noise.color}
-              options={NOISE_OPTIONS}
-              onChange={(color) =>
-                updatePatch(setPatch, (current) => ({
-                  ...current,
-                  noise: { ...current.noise, color },
-                }))
-              }
-            />
-            <div className="knob-row knob-row-wide">
+            <div className="mixer-grid">
               <Knob
                 label="Noise Volume"
                 value={patch.noise.volume}
@@ -257,8 +254,6 @@ export function App() {
                   }))
                 }
               />
-            </div>
-            <div className="knob-row knob-row-wide">
               <Knob
                 label="Noise Attack"
                 value={patch.noise.envelope.attack}
@@ -315,26 +310,48 @@ export function App() {
                   }))
                 }
               />
-            </div>
-            <div className="toggle-row">
-              <Toggle
-                label="Noise Enabled"
-                checked={patch.noise.enabled}
-                onChange={(enabled) =>
+              <DiscreteKnob
+                label="Noise Color"
+                value={patch.noise.color}
+                options={NOISE_OPTIONS}
+                onChange={(color) =>
                   updatePatch(setPatch, (current) => ({
                     ...current,
-                    noise: { ...current.noise, enabled },
+                    noise: { ...current.noise, color },
                   }))
                 }
               />
+              <div className="mixer-toggle-cell">
+                <Toggle
+                  label="Noise Enabled"
+                  checked={patch.noise.enabled}
+                  onChange={(enabled) =>
+                    updatePatch(setPatch, (current) => ({
+                      ...current,
+                      noise: { ...current.noise, enabled },
+                    }))
+                  }
+                />
+              </div>
             </div>
-          </div>
-        </article>
+          </article>
 
-        <article className="module">
+          <article className="module">
           <div className="module-head">
             <p className="eyebrow">Shaping</p>
             <h2>Filter Contour</h2>
+          </div>
+
+          <div className="shaping-top">
+            <FilterScope
+              cutoff={patch.filter.cutoff}
+              emphasis={patch.filter.emphasis}
+              contourAmount={patch.filter.contourAmount}
+              attack={patch.filter.envelope.attack}
+              decay={patch.filter.envelope.decay}
+              sustain={patch.filter.envelope.sustain}
+              release={patch.filter.envelope.release}
+            />
           </div>
 
           <div className="knob-row knob-row-wide">
@@ -425,31 +442,17 @@ export function App() {
             />
           </div>
 
-          <div className="toggle-row">
-            <Toggle
-              label="Keyboard Ctrl 1"
-              checked={patch.filter.keyboardControl1}
-              onChange={(keyboardControl1) =>
-                updatePatch(setPatch, (current) => ({ ...current, filter: { ...current.filter, keyboardControl1 } }))
-              }
-            />
-            <Toggle
-              label="Keyboard Ctrl 2"
-              checked={patch.filter.keyboardControl2}
-              onChange={(keyboardControl2) =>
-                updatePatch(setPatch, (current) => ({ ...current, filter: { ...current.filter, keyboardControl2 } }))
-              }
-            />
-          </div>
-        </article>
+          </article>
+        </div>
 
-        <article className="module">
-          <div className="module-head">
-            <p className="eyebrow">Amplitude</p>
-            <h2>Loudness Contour</h2>
-          </div>
+        <div className="lower-grid">
+          <article className="module">
+            <div className="module-head">
+              <p className="eyebrow">Amplitude</p>
+              <h2>Loudness Contour</h2>
+            </div>
 
-          <div className="knob-row knob-row-wide">
+            <div className="knob-row knob-row-wide">
             <Knob
               label="Amp Attack"
               value={patch.amplifier.envelope.attack}
@@ -506,110 +509,103 @@ export function App() {
                 }))
               }
             />
-          </div>
+            </div>
 
-          <div className="toggle-row">
-            <Toggle
-              label="Decay On"
-              checked={patch.amplifier.decayEnabled}
-              onChange={(decayEnabled) =>
-                updatePatch(setPatch, (current) => ({ ...current, amplifier: { ...current.amplifier, decayEnabled } }))
-              }
-            />
-          </div>
-        </article>
+            <div className="toggle-row">
+              <Toggle
+                label="Decay On"
+                checked={patch.amplifier.decayEnabled}
+                onChange={(decayEnabled) =>
+                  updatePatch(setPatch, (current) => ({ ...current, amplifier: { ...current.amplifier, decayEnabled } }))
+                }
+              />
+            </div>
+          </article>
 
-        <article className="module">
-          <div className="module-head">
-            <p className="eyebrow">Performance</p>
-            <h2>Modulation And Glide</h2>
-          </div>
+          <article className="module">
+            <div className="module-head">
+              <p className="eyebrow">Performance</p>
+              <h2>Modulation And Glide</h2>
+            </div>
 
-          <DiscreteKnob
-            label="Mod Destination"
-            value={patch.modulation.destination}
-            options={MOD_DEST_OPTIONS}
-            onChange={(destination) =>
-              updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, destination } }))
-            }
-          />
+            <div className="performance-grid">
+              <Knob
+                label="Mod Mix"
+                value={patch.modulation.mix}
+                min={0}
+                max={1}
+                step={0.01}
+                formatValue={(value) => `${Math.round(value * 100)}%`}
+                onChange={(mix) =>
+                  updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, mix } }))
+                }
+              />
+              <Knob
+                label="Mod Wheel"
+                value={patch.modulation.wheel}
+                min={0}
+                max={1}
+                step={0.01}
+                formatValue={(value) => `${Math.round(value * 100)}%`}
+                onChange={(wheel) =>
+                  updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, wheel } }))
+                }
+              />
+              <Knob
+                label="Pitch Bend"
+                value={patch.modulation.pitchBend}
+                min={-1}
+                max={1}
+                step={0.01}
+                formatValue={(value) => `${value.toFixed(2)} st`}
+                onChange={(pitchBend) =>
+                  updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, pitchBend } }))
+                }
+              />
+              <Knob
+                label="Glide"
+                value={patch.modulation.glideTime}
+                min={0}
+                max={1.5}
+                step={0.01}
+                formatValue={(value) => `${value.toFixed(2)} s`}
+                onChange={(glideTime) =>
+                  updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, glideTime } }))
+                }
+              />
+              <Knob
+                label="Transpose"
+                value={patch.performance.transpose}
+                min={-24}
+                max={24}
+                step={1}
+                formatValue={(value) => `${Math.round(value)} st`}
+                onChange={(transpose) =>
+                  updatePatch(setPatch, (current) => ({ ...current, performance: { ...current.performance, transpose } }))
+                }
+              />
+              <DiscreteKnob
+                label="Mod Destination"
+                value={patch.modulation.destination}
+                options={MOD_DEST_OPTIONS}
+                onChange={(destination) =>
+                  updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, destination } }))
+                }
+              />
+            </div>
 
-          <div className="knob-row knob-row-wide">
-            <Knob
-              label="Mod Mix"
-              value={patch.modulation.mix}
-              min={0}
-              max={1}
-              step={0.01}
-              formatValue={(value) => `${Math.round(value * 100)}%`}
-              onChange={(mix) => updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, mix } }))}
-            />
-            <Knob
-              label="Mod Wheel"
-              value={patch.modulation.wheel}
-              min={0}
-              max={1}
-              step={0.01}
-              formatValue={(value) => `${Math.round(value * 100)}%`}
-              onChange={(wheel) =>
-                updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, wheel } }))
-              }
-            />
-            <Knob
-              label="Pitch Bend"
-              value={patch.modulation.pitchBend}
-              min={-1}
-              max={1}
-              step={0.01}
-              formatValue={(value) => `${value.toFixed(2)} st`}
-              onChange={(pitchBend) =>
-                updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, pitchBend } }))
-              }
-            />
-            <Knob
-              label="Glide"
-              value={patch.modulation.glideTime}
-              min={0}
-              max={1.5}
-              step={0.01}
-              formatValue={(value) => `${value.toFixed(2)} s`}
-              onChange={(glideTime) =>
-                updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, glideTime } }))
-              }
-            />
-            <Knob
-              label="Transpose"
-              value={patch.performance.transpose}
-              min={-24}
-              max={24}
-              step={1}
-              formatValue={(value) => `${Math.round(value)} st`}
-              onChange={(transpose) =>
-                updatePatch(setPatch, (current) => ({ ...current, performance: { ...current.performance, transpose } }))
-              }
-            />
-          </div>
-
-          <div className="toggle-row">
-            <Toggle
-              label="Glide On"
-              checked={patch.modulation.glideEnabled}
-              onChange={(glideEnabled) =>
-                updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, glideEnabled } }))
-              }
-            />
-          </div>
-        </article>
+            <div className="toggle-row">
+              <Toggle
+                label="Glide On"
+                checked={patch.modulation.glideEnabled}
+                onChange={(glideEnabled) =>
+                  updatePatch(setPatch, (current) => ({ ...current, modulation: { ...current.modulation, glideEnabled } }))
+                }
+              />
+            </div>
+          </article>
+        </div>
       </section>
-
-      <Keyboard
-        onNoteStart={(note) => {
-          void armAudio().then(() => engineRef.current?.noteOn(note));
-        }}
-        onNoteEnd={(note) => {
-          engineRef.current?.noteOff(note);
-        }}
-      />
     </main>
   );
 }

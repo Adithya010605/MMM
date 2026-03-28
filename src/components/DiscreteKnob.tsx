@@ -71,9 +71,8 @@ export function DiscreteKnob<T extends string>({ label, value, options, onChange
         <span className="knob-face selector-knob-face">
           <span className="knob-ring" />
           <span className="selector-knob-pointer" style={{ transform: `rotate(${angle}deg)` }}>
-            <span className="knob-indicator knob-indicator-fat" />
+            <span className="knob-dot knob-dot-outer" />
           </span>
-          <span className="selector-knob-center">{options[activeIndex].label}</span>
         </span>
       </button>
       <span className="knob-label">{label}</span>

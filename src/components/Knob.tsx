@@ -65,8 +65,11 @@ export function Knob({ label, value, min, max, step = 0.01, formatValue, onChang
           snap(clamp(value + direction * step * precision, min, max));
         }}
       >
-        <span className="knob-face" style={{ transform: `rotate(${angle}deg)` }}>
-          <span className="knob-indicator" />
+        <span className="knob-face knob-face-unified">
+          <span className="knob-ring" />
+          <span className="selector-knob-pointer" style={{ transform: `rotate(${angle}deg)` }}>
+            <span className="knob-dot knob-dot-outer" />
+          </span>
         </span>
       </button>
       <span className="knob-label">{label}</span>

@@ -1,10 +1,14 @@
 import { useEffect, useRef } from "react";
+import type { OscillatorPatch } from "../types/synth";
 
 type WaveformScopeProps = {
   analyser: AnalyserNode | null;
+  oscillators: OscillatorPatch[];
 };
 
-export function WaveformScope({ analyser }: WaveformScopeProps) {
+const OSC_COLORS = ["#f2b7c7", "#9ec5ff", "#f5de87"];
+
+export function WaveformScope({ analyser, oscillators }: WaveformScopeProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -50,11 +54,25 @@ export function WaveformScope({ analyser }: WaveformScopeProps) {
         context.stroke();
       }
 
-      context.strokeStyle = "#ffffff";
-      context.lineWidth = 2.6;
-      context.beginPath();
-
       if (analyser && data) {
+        const activeColors = oscillators
+          .map((oscillator, index) => (oscillator.enabled && !oscillator.lfoMode ? OSC_COLORS[index] : null))
+          .filter((color): color is string => color !== null);
+
+        const stroke = activeColors.length <= 1
+          ? activeColors[0] ?? "#ffffff"
+          : (() => {
+              const gradient = context.createLinearGradient(0, 0, width, 0);
+              activeColors.forEach((color, index) => {
+                gradient.addColorStop(index / Math.max(activeColors.length - 1, 1), color);
+              });
+              return gradient;
+            })();
+
+        context.strokeStyle = stroke;
+        context.lineWidth = 2.6;
+        context.beginPath();
+
         analyser.getByteTimeDomainData(data);
         let start = 0;
         for (let index = 1; index < data.length; index += 1) {
@@ -72,16 +90,47 @@ export function WaveformScope({ analyser }: WaveformScopeProps) {
           if (index === 0) context.moveTo(x, y);
           else context.lineTo(x, y);
         }
+
+        context.save();
+        context.lineTo(width, height - 12);
+        context.lineTo(0, height - 12);
+        context.closePath();
+        const fill = context.createLinearGradient(0, mid - height * 0.26, 0, height);
+        if (typeof stroke === "string") {
+          fill.addColorStop(0, `${stroke}33`);
+        } else {
+          fill.addColorStop(0, "rgba(255,255,255,0.18)");
+        }
+        fill.addColorStop(1, "rgba(255,255,255,0.01)");
+        context.fillStyle = fill;
+        context.fill();
+        context.restore();
+
+        context.shadowBlur = 16;
+        context.shadowColor = typeof stroke === "string" ? stroke : "rgba(255,255,255,0.38)";
+        context.beginPath();
+        for (let index = 0; index < span; index += 1) {
+          const sample = (data[start + index] - 128) / 128;
+          const x = (index / Math.max(span - 1, 1)) * width;
+          const y = mid - sample * height * 0.42;
+          if (index === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
+        }
+        context.stroke();
+        context.shadowBlur = 0;
       } else {
+        context.strokeStyle = "#ffffff";
+        context.lineWidth = 2.6;
+        context.beginPath();
         for (let index = 0; index < width; index += 1) {
           const phase = index / width;
           const y = mid - Math.sin(phase * Math.PI * 6 + frame * 0.03) * height * 0.34;
           if (index === 0) context.moveTo(index, y);
           else context.lineTo(index, y);
         }
-      }
 
-      context.stroke();
+        context.stroke();
+      }
       frame = window.requestAnimationFrame(draw);
     };
 
@@ -93,7 +142,7 @@ export function WaveformScope({ analyser }: WaveformScopeProps) {
       window.removeEventListener("resize", resize);
       window.cancelAnimationFrame(frame);
     };
-  }, [analyser]);
+  }, [analyser, oscillators]);
 
   return <canvas ref={canvasRef} className="scope-canvas" aria-label="Waveform visualization" />;
 }
